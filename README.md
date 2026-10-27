@@ -10,9 +10,10 @@
   nhận, whitelist bảo vệ process hệ thống lõi, và **thử lại với quyền quản trị qua
   pkexec** khi bị từ chối quyền.
 - **Giai đoạn 3 (xong):** Dọn dẹp rác — quét dung lượng cache APT, thumbnail, Thùng
-  rác, crash report, log hệ thống, file tạm của bạn, package mồ côi; chọn mục cần
-  dọn, xác nhận rồi mới xóa thật; kernel cũ chỉ hiển thị thông tin (không tự xóa vì
-  rủi ro cao).
+  rác, crash report, log hệ thống, file tạm của bạn, package mồ côi, và khối cache
+  công cụ lập trình (npm/pnpm/yarn/bun/pip/cargo/go/flatpak, chọn từng tool);
+  chọn mục cần dọn, xác nhận rồi mới xóa thật; kernel cũ chỉ hiển thị thông tin
+  (không tự xóa vì rủi ro cao).
 - **Giai đoạn 4 (xong):** Tối ưu hệ thống — gợi ý thông minh theo ngưỡng RAM/CPU,
   danh sách app khởi động cùng hệ thống (XDG Autostart) và systemd user-service
   đang bật, bật/tắt bằng switch — **không cần quyền root, luôn bật lại được**.

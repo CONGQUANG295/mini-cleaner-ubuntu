@@ -59,6 +59,182 @@ class JunkCategory:
     requires_root: bool
 
 
+@dataclass
+class DevToolCache:
+    id: str
+    title: str
+    path_hint: str
+    paths: list[str]
+    size_bytes: int
+    cli_clean: list[str] | None
+
+
+def _go_cache_paths() -> list[str]:
+    """Đường dẫn cache Go của user (bỏ override GOMODCACHE/GOCACHE của môi trường cha)."""
+    paths: list[str] = []
+    try:
+        env = os.environ.copy()
+        env.pop("GOMODCACHE", None)
+        env.pop("GOCACHE", None)
+        result = subprocess.run(
+            ["go", "env", "GOMODCACHE", "GOCACHE"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=env,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line:
+                    paths.append(line)
+    except Exception:
+        pass
+    if not paths:
+        paths = [
+            os.path.expanduser("~/go/pkg/mod"),
+            os.path.expanduser("~/.cache/go-build"),
+        ]
+    return paths
+
+
+def _iter_dev_tool_specs():
+    """Yield (id, title, path_hint, paths, cli_clean)."""
+    home = os.path.expanduser("~")
+    specs = [
+        (
+            "npm",
+            "Cache npm",
+            "~/.npm/_cacache",
+            [f"{home}/.npm/_cacache", f"{home}/.npm/_logs"],
+            ["npm", "cache", "clean", "--force"],
+        ),
+        (
+            "pnpm",
+            "Cache pnpm",
+            "~/.local/share/pnpm + ~/.cache/pnpm",
+            [f"{home}/.local/share/pnpm/store", f"{home}/.cache/pnpm"],
+            ["pnpm", "store", "prune"],
+        ),
+        (
+            "yarn",
+            "Cache yarn",
+            "~/.cache/yarn",
+            [f"{home}/.cache/yarn", f"{home}/.yarn/berry/cache"],
+            ["yarn", "cache", "clean"],
+        ),
+        (
+            "bun",
+            "Cache bun",
+            "~/.bun/install/cache",
+            [f"{home}/.bun/install/cache"],
+            ["bun", "pm", "cache", "rm"],
+        ),
+        (
+            "pip",
+            "Cache pip",
+            "~/.cache/pip",
+            [f"{home}/.cache/pip"],
+            ["pip", "cache", "purge"],
+        ),
+        (
+            "cargo",
+            "Cache cargo",
+            "~/.cargo/registry/cache",
+            [f"{home}/.cargo/registry/cache", f"{home}/.cargo/git/db"],
+            None,
+        ),
+        (
+            "go",
+            "Cache Go",
+            "GOMODCACHE / GOCACHE",
+            _go_cache_paths(),
+            ["go", "clean", "-modcache"],
+        ),
+        (
+            "flatpak",
+            "Cache Flatpak (user)",
+            "~/.cache/flatpak",
+            [f"{home}/.cache/flatpak"],
+            None,
+        ),
+    ]
+    yield from specs
+
+
+def scan_dev_tool_caches() -> list[DevToolCache]:
+    out: list[DevToolCache] = []
+    for tool_id, title, path_hint, paths, cli_clean in _iter_dev_tool_specs():
+        size = sum(_dir_size(p) for p in paths)
+        if size <= 0:
+            continue
+        out.append(DevToolCache(tool_id, title, path_hint, paths, size, cli_clean))
+    return out
+
+
+def _binary_on_path(name: str) -> bool:
+    import shutil
+
+    return shutil.which(name) is not None
+
+
+def _clear_paths(paths: list[str]) -> None:
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        if os.path.isdir(path) and not os.path.islink(path):
+            try:
+                for entry in os.scandir(path):
+                    _remove_path(entry.path)
+            except OSError:
+                continue
+        else:
+            _remove_path(path)
+
+
+def _clean_go_cache(tool: DevToolCache) -> tuple[bool, str]:
+    """Dọn đúng các path đã quét: gắn env cho go clean rồi luôn xóa nội dung path."""
+    if _binary_on_path("go"):
+        try:
+            env = os.environ.copy()
+            env.pop("GOMODCACHE", None)
+            env.pop("GOCACHE", None)
+            if len(tool.paths) >= 1:
+                env["GOMODCACHE"] = tool.paths[0]
+            if len(tool.paths) >= 2:
+                env["GOCACHE"] = tool.paths[1]
+            for args in (["go", "clean", "-modcache"], ["go", "clean", "-cache"]):
+                subprocess.run(
+                    args, capture_output=True, text=True, timeout=120, env=env
+                )
+        except Exception:
+            pass
+    try:
+        _clear_paths(tool.paths)
+        return True, f"Đã dọn {tool.title}"
+    except Exception as e:
+        return False, str(e)
+
+
+def clean_dev_tool_cache(tool: DevToolCache) -> tuple[bool, str]:
+    if tool.id == "go":
+        return _clean_go_cache(tool)
+    if tool.cli_clean and _binary_on_path(tool.cli_clean[0]):
+        try:
+            result = subprocess.run(
+                tool.cli_clean, capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                return True, f"Đã dọn {tool.title} (CLI)"
+        except Exception:
+            pass
+    try:
+        _clear_paths(tool.paths)
+        return True, f"Đã dọn {tool.title}"
+    except Exception as e:
+        return False, str(e)
+
+
 def scan_apt_cache() -> JunkCategory:
     size = _files_size("/var/cache/apt/archives/*.deb")
     return JunkCategory("apt_cache", "Cache gói APT (.deb đã tải)", "/var/cache/apt/archives", size, True)

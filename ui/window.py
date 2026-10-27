@@ -26,12 +26,16 @@ from ui.advisor_page import AdvisorPage
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app, title="Mini Cleaner")
-        self.set_default_size(920, 620)
+        # Rộng hơn để đủ chỗ cho path cache / cột dung lượng; chặn thu hẹp quá mức
+        self.set_default_size(1100, 720)
+        self.set_size_request(960, 560)
 
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         paned.set_position(230)
         paned.set_resize_start_child(False)
         paned.set_shrink_start_child(False)
+        paned.set_hexpand(True)
+        paned.set_vexpand(True)
         self.set_content(paned)
 
         # ---------- Sidebar ----------
@@ -76,9 +80,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _wrap_with_header(self, child: Gtk.Widget, title: str) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_hexpand(True)
+        box.set_vexpand(True)
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title=title))
         box.append(header)
+        child.set_hexpand(True)
+        child.set_vexpand(True)
         box.append(child)
         return box
 
