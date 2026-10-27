@@ -31,7 +31,8 @@ class AdvisorPage(Gtk.Box):
         self.set_margin_start(16)
         self.set_margin_end(16)
 
-        self.monitor = SystemMonitor()
+        # Chỉ cần snapshot RAM — không warm toàn bộ process (rất tốn lúc mở app)
+        self.monitor = SystemMonitor(warm_processes=False)
 
         # ---------- Gợi ý thông minh ----------
         self.suggestion_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -86,9 +87,16 @@ class AdvisorPage(Gtk.Box):
         services_scroller.set_vexpand(True)
         self.append(services_scroller)
 
-        self._start_scan()
+        self._scanned = False
+        self.connect("map", self._on_mapped)
 
     # ---------- Quét (chạy nền) ----------
+
+    def _on_mapped(self, *_args):
+        if self._scanned:
+            return
+        self._scanned = True
+        self._start_scan()
 
     def _start_scan(self):
         self.suggestion_label.set_text("Đang phân tích hệ thống...")

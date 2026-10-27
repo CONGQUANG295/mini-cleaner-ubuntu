@@ -12,7 +12,7 @@ from gi.repository import Gtk, Adw, GLib
 
 from core.system_monitor import SystemMonitor
 
-REFRESH_INTERVAL_MS = 1500  # cập nhật mỗi 1.5 giây
+REFRESH_INTERVAL_MS = 2000  # cập nhật mỗi 2 giây (đủ mượt, đỡ tốn CPU)
 
 
 def _level_css_class(percent: float) -> str:
@@ -79,7 +79,7 @@ class DashboardPage(Gtk.Box):
         self.set_margin_start(16)
         self.set_margin_end(16)
 
-        self.monitor = SystemMonitor()
+        self.monitor = None  # tạo khi trang map lần đầu — tránh warm process lúc khởi động
 
         # --- Hàng thẻ chỉ số ---
         cards_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, homogeneous=True)
@@ -116,10 +116,24 @@ class DashboardPage(Gtk.Box):
 
         self._prev_net_recv = None
         self._prev_net_sent = None
+        self._timer_id = None
 
-        # Cập nhật lần đầu ngay lập tức, sau đó lặp định kỳ
+        # Chỉ poll khi trang đang hiện — tránh quét process nền khi đang ở tab khác
+        self.connect("map", self._on_mapped)
+        self.connect("unmap", self._on_unmapped)
+
+    def _on_mapped(self, *_args):
+        if self._timer_id is not None:
+            return
+        if self.monitor is None:
+            self.monitor = SystemMonitor()
         self._refresh()
-        GLib.timeout_add(REFRESH_INTERVAL_MS, self._refresh)
+        self._timer_id = GLib.timeout_add(REFRESH_INTERVAL_MS, self._refresh)
+
+    def _on_unmapped(self, *_args):
+        if self._timer_id is not None:
+            GLib.source_remove(self._timer_id)
+            self._timer_id = None
 
     def _refresh(self) -> bool:
         """Được GLib gọi định kỳ. Return True để tiếp tục lặp lại."""
@@ -144,12 +158,15 @@ class DashboardPage(Gtk.Box):
             delta_sent = max(0.0, snap.net_sent_mb - self._prev_net_sent)
             speed_kb_s = (delta_recv + delta_sent) * 1024 / (REFRESH_INTERVAL_MS / 1000)
             fraction = min(1.0, speed_kb_s / 5000)  # 5MB/s coi như "đầy" thanh bar
-            self.net_card.update(fraction, f"↓{delta_recv*1024:.0f} KB  ↑{delta_sent*1024:.0f} KB /1.5s")
+            self.net_card.update(
+                fraction,
+                f"↓{delta_recv*1024:.0f} KB  ↑{delta_sent*1024:.0f} KB /{REFRESH_INTERVAL_MS/1000:.0f}s",
+            )
         self._prev_net_recv = snap.net_recv_mb
         self._prev_net_sent = snap.net_sent_mb
 
         self._refresh_process_list()
-        return True  # giữ cho timeout tiếp tục chạy
+        return self._timer_id is not None
 
     def _refresh_process_list(self):
         # Xóa danh sách cũ
@@ -168,9 +185,10 @@ class DashboardPage(Gtk.Box):
 
             cpu_label = Gtk.Label(label=f"{proc.cpu_percent:.1f}% CPU")
             cpu_label.add_css_class("numeric")
-            if proc.cpu_percent >= 50:
+            # Ngưỡng theo % tổng cores (trước đây là per-core nên số cao hơn nhiều)
+            if proc.cpu_percent >= 25:
                 cpu_label.add_css_class("level-danger")
-            elif proc.cpu_percent >= 20:
+            elif proc.cpu_percent >= 10:
                 cpu_label.add_css_class("level-warning")
 
             row.add_suffix(cpu_label)

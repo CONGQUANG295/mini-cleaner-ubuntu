@@ -11,6 +11,17 @@ import psutil
 from dataclasses import dataclass
 
 
+def normalize_cpu_percent(raw: float) -> float:
+    """
+    Đổi CPU% kiểu top (theo 1 logical core, có thể >100) sang % trên tổng
+    toàn bộ logical cores (0–100 khi dùng hết máy).
+    """
+    if raw <= 0:
+        return 0.0
+    n_cpus = psutil.cpu_count(logical=True) or 1
+    return raw / n_cpus
+
+
 @dataclass
 class SystemSnapshot:
     """Một 'lát cắt' thông số hệ thống tại thời điểm hiện tại."""
@@ -41,14 +52,16 @@ class SystemMonitor:
     (psutil cần gọi cpu_percent() hai lần cách nhau một khoảng để có số liệu đúng).
     """
 
-    def __init__(self):
+    def __init__(self, warm_processes: bool = True):
         # "Làm nóng" bộ đo CPU percent - lần gọi đầu luôn trả về 0.0
         psutil.cpu_percent(interval=None)
-        for p in psutil.process_iter(["pid"]):
-            try:
-                p.cpu_percent(interval=None)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+        # warm_processes=False khi chỉ cần snapshot hệ thống (tránh duyệt ~hàng trăm PID lúc mở app)
+        if warm_processes:
+            for p in psutil.process_iter(["pid"]):
+                try:
+                    p.cpu_percent(interval=None)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
 
     def get_snapshot(self) -> SystemSnapshot:
         """Lấy thông số tổng quan CPU/RAM/Disk/Network hiện tại."""
@@ -74,11 +87,12 @@ class SystemMonitor:
         """
         Trả về danh sách top process chiếm tài nguyên nhiều nhất.
         sort_by: "cpu" hoặc "mem"
+        CPU% đã chuẩn hóa theo tổng logical cores (0–100 của cả máy).
         """
         procs = []
         for p in psutil.process_iter(["pid", "name", "memory_percent", "memory_info"]):
             try:
-                cpu = p.cpu_percent(interval=None)
+                cpu = normalize_cpu_percent(p.cpu_percent(interval=None))
                 info = p.info
                 mem_mb = (info["memory_info"].rss / (1024 ** 2)) if info["memory_info"] else 0.0
                 procs.append(

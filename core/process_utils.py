@@ -24,11 +24,13 @@ from dataclasses import dataclass, field
 
 import psutil
 
+from core.system_monitor import normalize_cpu_percent
 from core.whitelist import is_protected
 
 # Ngưỡng tài nguyên để coi 1 process "không cửa sổ" là đáng chú ý
 # (tránh gắn cờ tràn lan mọi daemon nền bình thường, vốn vốn dĩ không có cửa sổ)
-NO_WINDOW_CPU_THRESHOLD = 3.0     # %
+# CPU threshold tính theo raw psutil (per-core, giống top) trước khi normalize hiển thị.
+NO_WINDOW_CPU_THRESHOLD = 3.0     # % của 1 logical core
 NO_WINDOW_MEM_MB_THRESHOLD = 150  # MB
 
 
@@ -144,7 +146,8 @@ def scan_all_processes() -> list[FullProcessInfo]:
             ppid = info["ppid"] or 0
             name = info["name"] or "?"
             status = info["status"]
-            cpu = p.cpu_percent(interval=None)
+            cpu_raw = p.cpu_percent(interval=None)
+            cpu = normalize_cpu_percent(cpu_raw)
             mem_info = info["memory_info"]
             mem_mb = (mem_info.rss / (1024 ** 2)) if mem_info else 0.0
             mem_percent = info["memory_percent"] or 0.0
@@ -169,7 +172,7 @@ def scan_all_processes() -> list[FullProcessInfo]:
 
             if windowed_pids is not None and not protected and not is_kernel_thread:
                 consumes_significant = (
-                    cpu >= NO_WINDOW_CPU_THRESHOLD or mem_mb >= NO_WINDOW_MEM_MB_THRESHOLD
+                    cpu_raw >= NO_WINDOW_CPU_THRESHOLD or mem_mb >= NO_WINDOW_MEM_MB_THRESHOLD
                 )
                 flags.no_window = pid not in windowed_pids and consumes_significant
 

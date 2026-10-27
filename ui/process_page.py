@@ -16,7 +16,7 @@ import psutil
 from core.process_utils import scan_all_processes, FullProcessInfo
 from core.privileged import elevated_kill
 
-REFRESH_INTERVAL_MS = 3000  # quét chậm hơn Dashboard vì nặng hơn (toàn bộ process)
+REFRESH_INTERVAL_MS = 5000  # quét chậm — scan toàn bộ process rất nặng (~100ms+)
 MAX_ROWS_DISPLAYED = 150    # tránh treo UI khi máy có quá nhiều process
 
 
@@ -81,15 +81,28 @@ class ProcessPage(Gtk.Box):
         scroller.set_vexpand(True)
         self.append(scroller)
 
-        self._refresh()
-        GLib.timeout_add(REFRESH_INTERVAL_MS, self._refresh)
+        self._timer_id = None
+        # Chỉ poll khi trang đang hiện — tránh đốt CPU khi đang ở Dashboard/Cleaner/...
+        self.connect("map", self._on_mapped)
+        self.connect("unmap", self._on_unmapped)
 
     # ---------- Nạp dữ liệu ----------
+
+    def _on_mapped(self, *_args):
+        if self._timer_id is not None:
+            return
+        self._refresh()
+        self._timer_id = GLib.timeout_add(REFRESH_INTERVAL_MS, self._refresh)
+
+    def _on_unmapped(self, *_args):
+        if self._timer_id is not None:
+            GLib.source_remove(self._timer_id)
+            self._timer_id = None
 
     def _refresh(self) -> bool:
         self._all_processes = scan_all_processes()
         self._render_list()
-        return True  # giữ cho GLib.timeout tiếp tục lặp
+        return self._timer_id is not None
 
     def _on_sort_changed(self, dropdown, _pspec):
         idx = dropdown.get_selected()
